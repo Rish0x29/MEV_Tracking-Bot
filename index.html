@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MEV Intelligence Center</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@400;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg:        #06070a;
+  --s1:        #0c0e14;
+  --s2:        #12151e;
+  --border:    #1e2330;
+  --accent:    #ff3d00;
+  --amber:     #ff9500;
+  --green:     #00e676;
+  --blue:      #448aff;
+  --purple:    #aa00ff;
+  --text:      #cdd3e0;
+  --text2:     #5a6480;
+  --text3:     #2e3550;
+  --mono:      'JetBrains Mono', monospace;
+  --display:   'Barlow Condensed', sans-serif;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.05) 2px,
+    rgba(0,0,0,0.05) 4px
+  );
+}
+
+/* Grid */
+body::before {
+  content: '';
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(rgba(255,61,0,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,61,0,0.015) 1px, transparent 1px);
+  background-size: 60px 60px;
+}
+
+.shell { position: relative; z-index: 1; display: flex; flex-direction: column; min-height: 100vh; }
+
+/* ── TOPBAR ── */
+.topbar {
+  height: 52px;
+  background: rgba(6,7,10,0.97);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 0;
+  position: sticky; top: 0; z-index: 100;
+}
+
+.topbar-logo {
+  width: 200px;
+  border-right: 1px solid var(--border);
+  padding: 0 20px;
+  height: 100%;
+  display: flex; align-items: center; gap: 10px;
+}
+
+.logo-box {
+  width: 28px; height: 28px;
+  background: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--display); font-weight: 800; font-size: 13px;
+  color: #000; flex-shrink: 0;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%);
+}
+
+.logo-text {
+  font-family: var(--display); font-weight: 700; font-size: 16px;
+  letter-spacing: 0.05em; color: var(--text);
+  line-height: 1.1;
+}
+.logo-text span { color: var(--accent); }
+
+.topbar-nav { display: flex; height: 100%; flex: 1; }
+
+.nav-item {
+  height: 100%; padding: 0 20px;
+  display: flex; align-items: center; gap: 8px;
+  border-right: 1px solid var(--border);
+  font-size: 11px; color: var(--text2);
+  cursor: pointer; transition: all 0.12s;
+  white-space: nowrap; user-select: none;
+  background: none; border-top: none; border-left: none; border-bottom: none;
+  font-family: var(--mono);
+}
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.02); }
+.nav-item.active {
+  color: var(--accent);
+  background: rgba(255,61,0,0.05);
+  border-right-color: var(--border);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.nav-icon { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+.topbar-right {
+  margin-left: auto;
+  padding: 0 20px;
+  display: flex; align-items: center; gap: 16px;
+  border-left: 1px solid var(--border);
+  height: 100%;
+}
+
+.eth-price { font-size: 11px; color: var(--amber); }
+.block-info { font-size: 10px; color: var(--text2); }
+
+.status-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: redpulse 1s ease-in-out infinite;
+}
+@keyframes redpulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(255,61,0,0.4)} 50%{opacity:0.5;box-shadow:0 0 0 4px transparent} }
+
+/* ── MAIN ── */
+.main { display: flex; flex: 1; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 200px; flex-shrink: 0;
+  background: var(--s1);
+  border-right: 1px solid var(--border);
+  padding: 16px 0;
+}
+
+.sb-section { margin-bottom: 20px; }
+.sb-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--text3); padding: 0 16px; margin-bottom: 6px; display: block;
+}
+
+.sb-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 16px; font-size: 11px; color: var(--text2);
+  cursor: pointer; transition: all 0.1s; position: relative;
+}
+.sb-item:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+.sb-item.active { color: var(--accent); }
+.sb-item.active::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--accent);
+}
+.sb-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; }
+
+.sb-stat {
+  padding: 8px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.sb-stat-label { font-size: 10px; color: var(--text2); }
+.sb-stat-val { font-size: 11px; color: var(--text); }
+
+/* ── CONTENT ── */
+.content { flex: 1; padding: 20px; overflow-y: auto; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ── METRIC STRIP ── */
+.metric-strip { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; margin-bottom: 18px; }
+
+.metric {
+  background: var(--s1); border: 1px solid var(--border); border-radius: 4px;
+  padding: 12px 14px; position: relative; overflow: hidden;
+}
+.metric::after {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: var(--m-accent, var(--accent));
+}
+.m-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text2); margin-bottom: 5px; }
+.m-val { font-family: var(--display); font-weight: 700; font-size: 24px; color: var(--m-accent, var(--accent)); line-height: 1; }
+.m-sub { font-size: 9px; color: var(--text2); margin-top: 3px; }
+
+/* ── LAYOUT HELPERS ── */
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+.row1 { margin-bottom: 14px; }
+.span2 { grid-column: span 2; }
+
+/* ── PANEL ── */
+.panel { background: var(--s1); border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
+.ph {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text2);
+}
+.ph-accent { width: 3px; height: 12px; background: var(--accent); border-radius: 1px; }
+.ph-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.pb { padding: 14px; }
+
+/* ── CHART ── */
+.chart-wrap { position: relative; }
+
+/* ── TABLE ── */
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table thead th {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--text2); text-align: left; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: var(--s2);
+}
+.data-table tbody td { padding: 8px 12px; border-bottom: 1px solid rgba(30,35,48,0.7); font-size: 11px; }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr:hover td { background: rgba(255,255,255,0.02); }
+
+/* ── CHIPS ── */
+.chip { display: inline-block; padding: 2px 6px; border-radius: 2px; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.chip-red    { background: rgba(255,61,0,0.15);  color: var(--accent); border: 1px solid rgba(255,61,0,0.3); }
+.chip-green  { background: rgba(0,230,118,0.12); color: var(--green);  border: 1px solid rgba(0,230,118,0.25); }
+.chip-amber  { background: rgba(255,149,0,0.12); color: var(--amber);  border: 1px solid rgba(255,149,0,0.25); }
+.chip-blue   { background: rgba(68,138,255,0.12);color: var(--blue);   border: 1px solid rgba(68,138,255,0.25); }
+.chip-purple { background: rgba(170,0,255,0.12); color: var(--purple); border: 1px solid rgba(170,0,255,0.25); }
+
+.pos { color: var(--green); }
+.neg { color: var(--accent); }
+.mut { color: var(--text2); }
+
+/* ── SLIDERS ── */
+.ctrl { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ctrl-lbl { font-size: 10px; color: var(--text2); min-width: 130px; }
+.ctrl-val { font-size: 10px; color: var(--accent); min-width: 65px; text-align: right; }
+input[type=range] {
+  flex: 1; -webkit-appearance: none; height: 2px;
+  background: var(--border); border-radius: 99px; outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 12px; height: 12px;
+  border-radius: 1px; background: var(--accent); cursor: pointer;
+}
+
+/* ── TERMINAL ── */
+.terminal {
+  background: var(--bg); font-size: 10px; color: var(--text2);
+  padding: 10px 12px; height: 160px; overflow-y: auto; line-height: 1.9;
+  font-family: var(--mono);
+}
+.terminal::-webkit-scrollbar { width: 3px; }
+.terminal::-webkit-scrollbar-thumb { background: var(--border); }
+.tl { display: flex; gap: 10px; }
+.ts { color: var(--text3); min-width: 75px; flex-shrink: 0; }
+.tr { color: var(--accent); }
+.tg { color: var(--green); }
+.ta { color: var(--amber); }
+.tb { color: var(--blue); }
+
+/* ── HEATMAP ── */
+.heatmap { display: grid; grid-template-columns: 30px repeat(24,1fr); gap: 2px; }
+.hm-cell {
+  height: 16px; border-radius: 1px;
+  font-size: 0; /* data only in title attr */
+}
+.hm-label { font-size: 9px; color: var(--text2); display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; }
+.hm-hour { font-size: 8px; color: var(--text3); text-align: center; margin-bottom: 2px; }
+
+/* ── SANDWICH DIAGRAM ── */
+.sandwich-viz { display: flex; flex-direction: column; gap: 8px; }
+.sw-row { display: flex; align-items: center; gap: 10px; }
+.sw-label { font-size: 10px; min-width: 80px; }
+.sw-bar-wrap { flex: 1; background: var(--s2); border-radius: 1px; height: 20px; position: relative; overflow: hidden; }
+.sw-bar { height: 100%; border-radius: 1px; display: flex; align-items: center; padding: 0 8px; font-size: 9px; font-weight: 700; transition: width 0.4s; }
+.sw-val { font-size: 10px; min-width: 70px; text-align: right; }
+
+/* ── POOL PILLS ── */
+.pool-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.pill {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 2px;
+  font-size: 9px; color: var(--text2); cursor: pointer; background: none;
+  font-family: var(--mono); transition: all 0.1s; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.pill:hover { border-color: var(--accent); color: var(--accent); }
+.pill.active { background: rgba(255,61,0,0.1); border-color: var(--accent); color: var(--accent); }
+
+/* ── QUERY VIEWER ── */
+.query-block {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 3px;
+  padding: 12px 14px; margin-bottom: 10px;
+}
+.query-title { font-size: 10px; color: var(--amber); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.08em; }
+.query-desc { font-size: 10px; color: var(--text2); line-height: 1.7; margin-bottom: 8px; }
+.query-id { font-size: 9px; color: var(--text3); }
+.query-tags { display: flex; gap: 4px; margin-top: 6px; }
+
+/* ── ANIM ── */
+@keyframes slideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+.panel { animation: slideIn 0.25s ease forwards; }
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- TOPBAR -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <div class="logo-box">M</div>
+    <div class="logo-text">MEV<span>/</span>INTEL</div>
+  </div>
+  <div class="topbar-nav">
+    <button class="nav-item active" onclick="showTab('overview',this)"><div class="nav-icon"></div>Overview</button>
+    <button class="nav-item" onclick="showTab('sandwich',this)"><div class="nav-icon"></div>Sandwich Attacks</button>
+    <button class="nav-item" onclick="showTab('profitability',this)"><div class="nav-icon"></div>Profitability</button>
+    <button class="nav-item" onclick="showTab('queries',this)"><div class="nav-icon"></div>SQL Queries</button>
+  </div>
+  <div class="topbar-right">
+    <div class="status-dot"></div>
+    <div class="eth-price">ETH $<span id="ethPrice">2,400</span></div>
+    <div class="block-info">block #<span id="blk">21,847,914</span></div>
+  </div>
+</div>
+
+<div class="main">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div class="sb-section">
+    <span class="sb-label">live feeds</span>
+    <div class="sb-item active"><div class="sb-dot"></div>Mainnet</div>
+    <div class="sb-item"><div class="sb-dot"></div>Flashbots relay</div>
+    <div class="sb-item"><div class="sb-dot"></div>MEV-Share</div>
+  </div>
+  <div class="sb-section">
+    <span class="sb-label">tracked bots</span>
+    <div class="sb-item active"><div class="sb-dot"></div>jaredfromsubway</div>
+    <div class="sb-item"><div class="sb-dot"></div>Bot Alpha 0x6b75</div>
+    <div class="sb-item"><div class="sb-dot"></div>Sandwich C</div>
+    <div class="sb-item"><div class="sb-dot"></div>Titan Bot</div>
+  </div>
+  <div class="sb-section">
+    <span class="sb-label">session stats</span>
+    <div class="sb-stat"><span class="sb-stat-label">Blocks</span><span class="sb-stat-val" id="sb-blocks">0</span></div>
+    <div class="sb-stat"><span class="sb-stat-label">Attacks</span><span class="sb-stat-val" id="sb-attacks">0</span></div>
+    <div class="sb-stat"><span class="sb-stat-label">Victims</span><span class="sb-stat-val" id="sb-victims">0</span></div>
+    <div class="sb-stat"><span class="sb-stat-label">Extracted</span><span class="sb-stat-val neg" id="sb-extracted">$0</span></div>
+  </div>
+</div>
+
+<!-- CONTENT -->
+<div class="content">
+
+<!-- ══════════════ OVERVIEW ══════════════ -->
+<div class="tab-panel active" id="tab-overview">
+
+  <div class="metric-strip">
+    <div class="metric" style="--m-accent:var(--accent)">
+      <div class="m-label">Total MEV extracted</div>
+      <div class="m-val" id="ov-mev">$0</div>
+      <div class="m-sub">30-day window</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--amber)">
+      <div class="m-label">Sandwich attacks</div>
+      <div class="m-val" id="ov-attacks">0</div>
+      <div class="m-sub">detected this session</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--green)">
+      <div class="m-label">Bot net profit</div>
+      <div class="m-val" id="ov-profit">$0</div>
+      <div class="m-sub">after gas costs</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--blue)">
+      <div class="m-label">Avg victim slippage</div>
+      <div class="m-val" id="ov-slip">0.00%</div>
+      <div class="m-sub">above fair price</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--purple)">
+      <div class="m-label">Success rate</div>
+      <div class="m-val" id="ov-success">0%</div>
+      <div class="m-sub">profitable / attempted</div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Cumulative MEV extracted (USD)</div>
+      <div class="pb"><div class="chart-wrap" style="height:200px"><canvas id="cumulChart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Daily breakdown: bot profit vs victim loss</div>
+      <div class="pb"><div class="chart-wrap" style="height:200px"><canvas id="dailyChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Top MEV bots — 30d leaderboard</div>
+      <table class="data-table">
+        <thead><tr><th>Bot</th><th>Attacks</th><th>Extracted</th><th>Gas used</th><th>Net</th><th>Type</th></tr></thead>
+        <tbody id="bot-leaderboard"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Scanner terminal</div>
+      <div class="terminal" id="ov-terminal"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SANDWICH ══════════════ -->
+<div class="tab-panel" id="tab-sandwich">
+
+  <div class="metric-strip">
+    <div class="metric" style="--m-accent:var(--accent)">
+      <div class="m-label">Sandwich tx detected</div>
+      <div class="m-val" id="sw-count">0</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--amber)">
+      <div class="m-label">Total victim loss</div>
+      <div class="m-val" id="sw-loss">$0</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--green)">
+      <div class="m-label">Avg slippage imposed</div>
+      <div class="m-val" id="sw-slip">0%</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--blue)">
+      <div class="m-label">Most targeted pool</div>
+      <div class="m-val" style="font-size:14px;" id="sw-pool">—</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--purple)">
+      <div class="m-label">Attacks/block avg</div>
+      <div class="m-val" id="sw-rate">0</div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Live sandwich feed</div>
+      <table class="data-table">
+        <thead><tr><th>Block</th><th>Pair</th><th>Victim size</th><th>Attacker profit</th><th>Victim loss</th><th>Slippage</th></tr></thead>
+        <tbody id="sw-feed"></tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Attack anatomy simulator</div>
+      <div class="pb">
+        <div class="pool-pills">
+          <button class="pill active" onclick="setSwPool(this,4166,10e6,0.003)">ETH/USDC</button>
+          <button class="pill" onclick="setSwPool(this,150,10e6,0.003)">WBTC/ETH</button>
+          <button class="pill" onclick="setSwPool(this,50000,2e6,0.003)">LINK/ETH</button>
+        </div>
+        <div class="ctrl"><span class="ctrl-lbl">Frontrun size (ETH)</span><input type="range" min="0.1" max="50" step="0.1" value="5" id="fr-size" oninput="updateSandwich()"><span class="ctrl-val" id="fr-out">5 ETH</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Victim size (ETH)</span><input type="range" min="0.1" max="20" step="0.1" value="2" id="vi-size" oninput="updateSandwich()"><span class="ctrl-val" id="vi-out">2 ETH</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Gas price (Gwei)</span><input type="range" min="10" max="200" step="5" value="30" id="sw-gas" oninput="updateSandwich()"><span class="ctrl-val" id="sg-out">30</span></div>
+        <div style="margin-top:14px;" class="sandwich-viz" id="swViz"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Victim slippage distribution</div>
+      <div class="pb"><div class="chart-wrap" style="height:180px"><canvas id="slipChart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Attack heatmap — hour × day</div>
+      <div class="pb" id="heatmap-container"></div>
+    </div>
+  </div>
+
+  <div class="row1">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Pools most targeted by sandwich bots</div>
+      <div class="pb"><div class="chart-wrap" style="height:150px"><canvas id="poolChart"></canvas></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ PROFITABILITY ══════════════ -->
+<div class="tab-panel" id="tab-profitability">
+
+  <div class="metric-strip">
+    <div class="metric" style="--m-accent:var(--green)">
+      <div class="m-label">Gross profit (ETH)</div>
+      <div class="m-val" id="pr-gross">0</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--accent)">
+      <div class="m-label">Gas costs (ETH)</div>
+      <div class="m-val" id="pr-gas">0</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--amber)">
+      <div class="m-label">Net profit (USD)</div>
+      <div class="m-val" id="pr-net">$0</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--blue)">
+      <div class="m-label">Revenue/gas ratio</div>
+      <div class="m-val" id="pr-ratio">0×</div>
+    </div>
+    <div class="metric" style="--m-accent:var(--purple)">
+      <div class="m-label">ROI on capital</div>
+      <div class="m-val" id="pr-roi">0%</div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Bot P&L simulator</div>
+      <div class="pb">
+        <div class="ctrl"><span class="ctrl-lbl">Capital (ETH)</span><input type="range" min="1" max="100" step="1" value="10" id="pr-cap" oninput="updateProfit()"><span class="ctrl-val" id="pr-cap-out">10 ETH</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Attacks / block</span><input type="range" min="0.5" max="10" step="0.5" value="3" id="pr-rate" oninput="updateProfit()"><span class="ctrl-val" id="pr-rate-out">3.0</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Avg victim size (ETH)</span><input type="range" min="0.1" max="10" step="0.1" value="1.5" id="pr-vsize" oninput="updateProfit()"><span class="ctrl-val" id="pr-vsize-out">1.5 ETH</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Gas price (Gwei)</span><input type="range" min="10" max="200" step="5" value="30" id="pr-gas-r" oninput="updateProfit()"><span class="ctrl-val" id="pr-gas-out">30</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Success rate (%)</span><input type="range" min="20" max="95" step="1" value="65" id="pr-srate" oninput="updateProfit()"><span class="ctrl-val" id="pr-srate-out">65%</span></div>
+        <div class="ctrl"><span class="ctrl-lbl">Blocks per day</span><input type="range" min="2000" max="7200" step="100" value="7200" id="pr-bday" oninput="updateProfit()"><span class="ctrl-val" id="pr-bday-out">7200</span></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Cumulative P&L projection (30 days)</div>
+      <div class="pb"><div class="chart-wrap" style="height:220px"><canvas id="pnlChart"></canvas></div></div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Per-attack profit distribution</div>
+      <div class="pb"><div class="chart-wrap" style="height:160px"><canvas id="perAttackChart"></canvas></div></div>
+    </div>
+    <div class="panel">
+      <div class="ph"><div class="ph-accent"></div>Gas strategy comparison</div>
+      <div class="pb"><div class="chart-wrap" style="height:160px"><canvas id="gasChart"></canvas></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SQL QUERIES ══════════════ -->
+<div class="tab-panel" id="tab-queries">
+  <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;" id="query-grid"></div>
+</div>
+
+</div><!-- /content -->
+</div><!-- /main -->
+</div><!-- /shell -->
+
+<script>
+const ETH = 2400;
+
+// ─── Tab nav ───
+function showTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  if(btn) btn.classList.add('active');
+}
+
+// ─── Counters ───
+let blk=21847914, sessionBlocks=0, sessionAttacks=0, sessionVictims=0, sessionExtracted=0;
+setInterval(()=>{
+  blk++; sessionBlocks++;
+  document.getElementById('blk').textContent=blk.toLocaleString();
+  document.getElementById('sb-blocks').textContent=sessionBlocks;
+
+  // random attacks
+  const n=Math.floor(Math.random()*4);
+  sessionAttacks+=n; sessionVictims+=n;
+  sessionExtracted+=n*Math.random()*80;
+  document.getElementById('sb-attacks').textContent=sessionAttacks;
+  document.getElementById('sb-victims').textContent=sessionVictims;
+  document.getElementById('sb-extracted').textContent='$'+Math.round(sessionExtracted).toLocaleString();
+}, 12000);
+
+// ─── Generate seed data ───
+const DAYS=30, BLOCKS_PER_DAY=7200;
+function genDaily() {
+  const rows=[];
+  for(let d=0;d<DAYS;d++){
+    const attacks=Math.floor(Math.random()*800+400);
+    const vLoss=attacks*(Math.random()*60+20);
+    const bProfit=vLoss*(0.4+Math.random()*0.3);
+    rows.push({day:d, attacks, victimLoss:vLoss, botProfit:bProfit, gas:bProfit*(0.2+Math.random()*0.15)});
+  }
+  return rows;
+}
+const daily=genDaily();
+const cumMEV=daily.reduce((acc,d,i)=>{acc.push((acc[i-1]||0)+d.victimLoss);return acc;},[]);
+
+// ─── Overview charts ───
+const labels30=daily.map((_,i)=>{const d=new Date();d.setDate(d.getDate()-DAYS+i);return d.toLocaleDateString('en',{month:'short',day:'numeric'});});
+
+new Chart(document.getElementById('cumulChart').getContext('2d'),{
+  type:'line',
+  data:{labels:labels30,datasets:[{data:cumMEV,borderColor:'#ff3d00',borderWidth:2,pointRadius:0,tension:0.3,fill:true,backgroundColor:'rgba(255,61,0,0.05)'}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{ticks:{color:'#5a6480',font:{size:9},maxTicksLimit:8},grid:{display:false}},
+             y:{ticks:{color:'#5a6480',font:{size:9},callback:v=>'$'+(v/1000).toFixed(0)+'k'},grid:{color:'rgba(30,35,48,0.6)'}}}}
+});
+
+new Chart(document.getElementById('dailyChart').getContext('2d'),{
+  type:'bar',
+  data:{labels:labels30,datasets:[
+    {label:'Victim loss',data:daily.map(d=>Math.round(d.victimLoss)),backgroundColor:'rgba(255,61,0,0.7)',borderRadius:1},
+    {label:'Bot profit', data:daily.map(d=>Math.round(d.botProfit)),backgroundColor:'rgba(0,230,118,0.7)',borderRadius:1},
+  ]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{ticks:{color:'#5a6480',font:{size:9},maxTicksLimit:8},grid:{display:false},stacked:false},
+             y:{ticks:{color:'#5a6480',font:{size:9},callback:v=>'$'+v.toLocaleString()},grid:{color:'rgba(30,35,48,0.6)'}}}}
+});
+
+// ─── Leaderboard ───
+const BOTS=[
+  {name:'jaredfromsubway',addr:'0xae2f…13',attacks:18420,extracted:284000,gas:42000},
+  {name:'Bot Alpha',      addr:'0x6b75…80',attacks:9340, extracted:141000,gas:24000},
+  {name:'Sandwich C',     addr:'0x0000…b40',attacks:7120,extracted:98000, gas:18000},
+  {name:'Titan Bot',      addr:'0x0000…f56',attacks:5890,extracted:76000, gas:14000},
+];
+const tb=document.getElementById('bot-leaderboard');
+BOTS.forEach((b,i)=>{
+  const net=b.extracted-b.gas;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td><span style="color:var(--amber)">#${i+1}</span> <span style="color:var(--text2);font-size:10px">${b.addr}</span></td>
+    <td>${b.attacks.toLocaleString()}</td>
+    <td class="neg">$${b.extracted.toLocaleString()}</td>
+    <td class="mut">$${b.gas.toLocaleString()}</td>
+    <td class="pos">+$${net.toLocaleString()}</td>
+    <td><span class="chip chip-red">Sandwich</span></td>
+  `;
+  tb.appendChild(tr);
+});
+
+// ─── Metric totals ───
+const totalMEV=cumMEV[cumMEV.length-1];
+const totalProfit=daily.reduce((s,d)=>s+d.botProfit-d.gas,0);
+const totalAttacks=daily.reduce((s,d)=>s+d.attacks,0);
+document.getElementById('ov-mev').textContent='$'+(totalMEV/1000).toFixed(0)+'k';
+document.getElementById('ov-attacks').textContent=totalAttacks.toLocaleString();
+document.getElementById('ov-profit').textContent='$'+(totalProfit/1000).toFixed(0)+'k';
+document.getElementById('ov-slip').textContent='0.41%';
+document.getElementById('ov-success').textContent='63%';
+
+// ─── Terminal ───
+const LOGS=[
+  ['tr','✗ REVERT block#21847820 — victim tx front-ran by builder'],
+  ['tg','✓ SANDWICH block#21847821 WETH/USDC +0.0042 ETH net'],
+  ['ta','⚠ gas spike 145 gwei — holding back'],
+  ['tg','✓ SANDWICH block#21847823 LINK/WETH +0.0019 ETH net'],
+  ['tb','→ block#21847824 scanned — 3 candidates'],
+  ['tr','✗ REVERT block#21847824 — pool moved out of range'],
+  ['tg','✓ SANDWICH block#21847826 WBTC/USDC +0.0098 ETH net'],
+  ['ta','⚠ Flashbots bundle submitted — awaiting inclusion'],
+];
+const term=document.getElementById('ov-terminal');
+let li=0;
+function addLog(el){
+  const now=new Date();
+  const ts=`${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}:${now.getSeconds().toString().padStart(2,'0')}`;
+  const [cls,msg]=LOGS[li%LOGS.length];
+  const div=document.createElement('div');div.className='tl';
+  div.innerHTML=`<span class="ts">${ts}</span><span class="${cls}">${msg}</span>`;
+  el.appendChild(div); el.scrollTop=el.scrollHeight;
+  if(el.children.length>40)el.removeChild(el.firstChild);
+  li++;
+}
+setInterval(()=>addLog(term),1400);
+LOGS.forEach(()=>addLog(term));
+
+// ════════════════ SANDWICH TAB ════════════════
+
+// Feed
+const PAIRS=['WETH/USDC','WBTC/ETH','LINK/ETH','DAI/USDC','MATIC/WETH'];
+const swFeed=document.getElementById('sw-feed');
+let swCount=0,swLoss=0,swSlipSum=0;
+function addSwFeedRow(){
+  const pair=PAIRS[Math.floor(Math.random()*PAIRS.length)];
+  const vSize=(Math.random()*5+0.2).toFixed(3);
+  const ap=(Math.random()*0.005+0.0005).toFixed(5);
+  const vl=(Math.random()*0.002+0.0001).toFixed(5);
+  const sl=(Math.random()*1.5+0.05).toFixed(3);
+  const blkN=(blk-Math.floor(Math.random()*10)).toLocaleString();
+  swCount++; swLoss+=parseFloat(vl)*ETH; swSlipSum+=parseFloat(sl);
+  document.getElementById('sw-count').textContent=swCount;
+  document.getElementById('sw-loss').textContent='$'+Math.round(swLoss).toLocaleString();
+  document.getElementById('sw-slip').textContent=(swSlipSum/swCount).toFixed(3)+'%';
+  document.getElementById('sw-pool').textContent=PAIRS[0];
+  document.getElementById('sw-rate').textContent=(swCount/(sessionBlocks||1)).toFixed(2);
+
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td class="mut">#${blkN}</td>
+    <td>${pair}</td>
+    <td class="mut">${vSize} ETH</td>
+    <td class="pos">+${ap} ETH</td>
+    <td class="neg">-${vl} ETH</td>
+    <td><span class="chip chip-red">${sl}%</span></td>
+  `;
+  swFeed.prepend(tr);
+  if(swFeed.children.length>12)swFeed.removeChild(swFeed.lastChild);
+}
+setInterval(addSwFeedRow,2200);
+for(let i=0;i<8;i++)addSwFeedRow();
+
+// ─── Sandwich AMM Simulator ───
+let swRx=4166, swRy=10e6;
+function setSwPool(el,rx,ry,fee){
+  document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  swRx=rx; swRy=ry;
+  updateSandwich();
+}
+
+function ammOut(rxIn,ryIn,dxIn,fee=0.003){
+  return ryIn*dxIn*(1-fee)/(rxIn+dxIn*(1-fee));
+}
+
+function updateSandwich(){
+  const fr=+document.getElementById('fr-size').value;
+  const vi=+document.getElementById('vi-size').value;
+  const gas=+document.getElementById('sw-gas').value;
+  document.getElementById('fr-out').textContent=fr.toFixed(1)+' ETH';
+  document.getElementById('vi-out').textContent=vi.toFixed(1)+' ETH';
+  document.getElementById('sg-out').textContent=gas;
+
+  const fee=0.003;
+  // Frontrun
+  const dy_fr=ammOut(swRx,swRy,fr,fee);
+  const rx1=swRx+fr, ry1=swRy-dy_fr;
+  // Fair victim
+  const dy_fair=ammOut(swRx,swRy,vi,fee);
+  // Actual victim
+  const dy_vi=ammOut(rx1,ry1,vi,fee);
+  const rx2=rx1+vi, ry2=ry1-dy_vi;
+  // Backrun
+  const dx_br=rx2*dy_fr*fee/(ry2+dy_fr*(1-fee));
+  const gross=dx_br-fr;
+  const gasCost=350000*gas*1e-9;
+  const net=gross-gasCost;
+  const vLoss=dy_fair-dy_vi;
+  const slip=((dy_fair-dy_vi)/dy_fair*100).toFixed(3);
+
+  const viz=document.getElementById('swViz');
+  const MAX_ETH=Math.max(fr,vi,Math.abs(gross),0.001);
+  function barW(v){return Math.min(100,Math.abs(v)/MAX_ETH*90);}
+
+  viz.innerHTML=`
+    <div class="sw-row"><span class="sw-label mut">Frontrun in</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(fr)}%;background:rgba(255,61,0,0.3);color:var(--accent)">-${fr.toFixed(3)} ETH</div></div></div>
+    <div class="sw-row"><span class="sw-label mut">Victim in</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(vi)}%;background:rgba(68,138,255,0.2);color:var(--blue)">-${vi.toFixed(3)} ETH</div></div></div>
+    <div class="sw-row"><span class="sw-label mut">Victim got</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(dy_vi)}%;background:rgba(68,138,255,0.15);color:var(--blue)">${dy_vi.toFixed(2)} tokens</div></div></div>
+    <div class="sw-row"><span class="sw-label mut">Fair output</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(dy_fair)}%;background:rgba(0,230,118,0.1);color:var(--green)">${dy_fair.toFixed(2)} tokens</div></div></div>
+    <div class="sw-row"><span class="sw-label mut">Victim loss</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(vLoss*swRx/swRy)}%;background:rgba(255,61,0,0.2);color:var(--accent)">-${(vLoss*swRx/swRy).toFixed(4)} ETH equiv</div></div></div>
+    <div class="sw-row"><span class="sw-label mut">Bot net ${net>0?'profit':'loss'}</span><div class="sw-bar-wrap"><div class="sw-bar" style="width:${barW(Math.abs(gross))}%;background:rgba(0,230,118,0.2);color:var(--green)">${net>0?'+':''}${net.toFixed(5)} ETH</div></div></div>
+    <div style="margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:2px;font-size:10px;">
+      <span style="color:var(--text2)">Victim slippage: </span><span style="color:var(--accent)">${slip}%</span>&nbsp;&nbsp;
+      <span style="color:var(--text2)">Gas cost: </span><span style="color:var(--amber)">${gasCost.toFixed(5)} ETH</span>&nbsp;&nbsp;
+      <span style="color:var(--text2)">Profitable: </span><span style="color:${net>0?'var(--green)':'var(--accent)'}">${net>0?'YES':'NO'}</span>
+    </div>
+  `;
+}
+updateSandwich();
+
+// Slippage histogram
+new Chart(document.getElementById('slipChart'),{
+  type:'bar',
+  data:{labels:['<0.1%','0.1-0.5%','0.5-1%','1-2%','2-5%','>5%'],
+        datasets:[{data:[120,340,280,180,80,30],backgroundColor:'rgba(255,61,0,0.7)',borderRadius:2,borderWidth:0}]},
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{ticks:{color:'#5a6480',font:{size:9}},grid:{display:false}},
+             y:{ticks:{color:'#5a6480',font:{size:9}},grid:{color:'rgba(30,35,48,0.6)'}}}}
+});
+
+// Heatmap
+function buildHeatmap(){
+  const c=document.getElementById('heatmap-container');
+  c.style.overflowX='auto';
+  const days=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  let html='<div style="font-size:9px;color:var(--text2);margin-bottom:6px;">Hour (UTC) →</div>';
+  html+='<div style="display:grid;grid-template-columns:22px repeat(24,minmax(0,1fr));gap:2px;">';
+  // hour labels
+  html+='<div></div>';
+  for(let h=0;h<24;h++) html+=`<div style="font-size:8px;color:var(--text3);text-align:center">${h}</div>`;
+  for(let d=0;d<7;d++){
+    html+=`<div style="font-size:9px;color:var(--text2);display:flex;align-items:center">${days[d]}</div>`;
+    for(let h=0;h<24;h++){
+      // Peak hours: 12-18 UTC weekdays
+      const base=Math.random()*30;
+      const peak=(h>=12&&h<=18&&d>=1&&d<=5)?70:0;
+      const v=Math.min(100,base+peak+Math.random()*20);
+      const alpha=(v/100*0.9+0.05).toFixed(2);
+      html+=`<div style="height:14px;border-radius:1px;background:rgba(255,61,0,${alpha});title='${Math.round(v)} attacks'" title="${Math.round(v)} attacks"></div>`;
+    }
+  }
+  html+='</div>';
+  c.innerHTML=html;
+}
+buildHeatmap();
+
+// Pool chart
+new Chart(document.getElementById('poolChart'),{
+  type:'bar',
+  data:{
+    labels:['WETH/USDC 5bps','WBTC/USDC 30bps','LINK/WETH 30bps','DAI/USDC 1bps','MATIC/ETH 30bps','WETH/USDC 30bps','UNI/WETH','SHIB/WETH'],
+    datasets:[{
+      data:[4820,3140,1980,1620,980,760,540,320],
+      backgroundColor:'rgba(255,61,0,0.7)',borderRadius:2,borderWidth:0
+    }]
+  },
+  options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{ticks:{color:'#5a6480',font:{size:9}},grid:{color:'rgba(30,35,48,0.6)'}},
+             y:{ticks:{color:'#5a6480',font:{size:9}},grid:{display:false}}}}
+});
+
+// Sidebar sandwich stats sync
+setInterval(()=>{
+  document.getElementById('sw-count').textContent=swCount;
+  document.getElementById('sw-loss').textContent='$'+Math.round(swLoss).toLocaleString();
+},2000);
+
+// ════════════════ PROFITABILITY TAB ════════════════
+
+let pnlChart, perAttackChart;
+
+function updateProfit(){
+  const cap=+document.getElementById('pr-cap').value;
+  const rate=+document.getElementById('pr-rate').value;
+  const vsize=+document.getElementById('pr-vsize').value;
+  const gasGwei=+document.getElementById('pr-gas-r').value;
+  const srate=+document.getElementById('pr-srate').value/100;
+  const bday=+document.getElementById('pr-bday').value;
+
+  document.getElementById('pr-cap-out').textContent=cap+' ETH';
+  document.getElementById('pr-rate-out').textContent=rate.toFixed(1);
+  document.getElementById('pr-vsize-out').textContent=vsize.toFixed(1)+' ETH';
+  document.getElementById('pr-gas-out').textContent=gasGwei;
+  document.getElementById('pr-srate-out').textContent=Math.round(srate*100)+'%';
+  document.getElementById('pr-bday-out').textContent=bday.toLocaleString();
+
+  // Per-block estimates
+  const gasCostPerTx=350000*gasGwei*1e-9;
+  const grossPerAttack=vsize*0.003*0.5;  // rough: 0.5 × fee × victim size
+  const netPerAttack=grossPerAttack*srate - gasCostPerTx;
+
+  const attacksPerDay=rate*bday;
+  const netPerDay=netPerAttack*attacksPerDay;
+  const grossPerDay=grossPerAttack*srate*attacksPerDay;
+  const gasPerDay=gasCostPerTx*attacksPerDay;
+
+  const total30Net=netPerDay*30;
+  const total30Gross=grossPerDay*30;
+  const total30Gas=gasPerDay*30;
+
+  document.getElementById('pr-gross').textContent=total30Gross.toFixed(3);
+  document.getElementById('pr-gas').textContent=total30Gas.toFixed(3);
+  document.getElementById('pr-net').textContent='$'+Math.round(total30Net*ETH).toLocaleString();
+  document.getElementById('pr-ratio').textContent=(total30Gross/Math.max(total30Gas,0.001)).toFixed(1)+'×';
+  document.getElementById('pr-roi').textContent=((total30Net/cap)*100).toFixed(1)+'%';
+
+  // 30-day P&L projection
+  const days30=Array.from({length:30},(_,i)=>i+1);
+  const pnlCum=days30.map(d=>{
+    const noise=1+(Math.random()-0.5)*0.2;
+    return netPerDay*d*noise*ETH;
+  });
+  const hodlCum=days30.map(_=>0);
+
+  if(pnlChart){
+    pnlChart.data.datasets[0].data=pnlCum;
+    pnlChart.update('none');
+  } else {
+    pnlChart=new Chart(document.getElementById('pnlChart'),{
+      type:'line',
+      data:{
+        labels:days30.map(d=>'Day '+d),
+        datasets:[{label:'Cumulative net profit',data:pnlCum,borderColor:'#00e676',borderWidth:2,pointRadius:0,tension:0.3,fill:true,backgroundColor:'rgba(0,230,118,0.05)'}]
+      },
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{color:'#5a6480',font:{size:9},maxTicksLimit:8},grid:{display:false}},
+                 y:{ticks:{color:'#5a6480',font:{size:9},callback:v=>'$'+(v/1000).toFixed(1)+'k'},grid:{color:'rgba(30,35,48,0.5)'}}}}
+    });
+  }
+
+  // Per-attack distribution
+  const bins=Array.from({length:20},(_,i)=>((i-10)/1000).toFixed(4));
+  const dist=bins.map(b=>{
+    const v=parseFloat(b);
+    return Math.max(0,Math.round(Math.exp(-Math.pow((v-grossPerAttack)*500,2)*50)*200*(Math.random()*0.3+0.85)));
+  });
+  if(perAttackChart){
+    perAttackChart.data.datasets[0].data=dist;
+    perAttackChart.update('none');
+  } else {
+    perAttackChart=new Chart(document.getElementById('perAttackChart'),{
+      type:'bar',
+      data:{
+        labels:bins.map(b=>b+' E'),
+        datasets:[{data:dist,backgroundColor:bins.map(b=>parseFloat(b)>=0?'rgba(0,230,118,0.7)':'rgba(255,61,0,0.7)'),borderRadius:1,borderWidth:0}]
+      },
+      options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+        scales:{x:{ticks:{color:'#5a6480',font:{size:8},maxTicksLimit:8},grid:{display:false}},
+                 y:{ticks:{color:'#5a6480',font:{size:9}},grid:{color:'rgba(30,35,48,0.5)'}}}}
+    });
+  }
+}
+updateProfit();
+
+// Gas strategy comparison
+new Chart(document.getElementById('gasChart'),{
+  type:'bar',
+  data:{
+    labels:['Fixed 30gwei','Adaptive','Aggressive','MEV-Share','Flashbots Private'],
+    datasets:[
+      {label:'Success rate',data:[42,65,78,82,91],backgroundColor:'rgba(0,230,118,0.7)',borderRadius:2,borderWidth:0},
+      {label:'Net profit idx',data:[38,71,65,88,94],backgroundColor:'rgba(68,138,255,0.7)',borderRadius:2,borderWidth:0},
+    ]
+  },
+  options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+    scales:{x:{ticks:{color:'#5a6480',font:{size:9}},grid:{display:false}},
+             y:{ticks:{color:'#5a6480',font:{size:9},callback:v=>v+'%'},grid:{color:'rgba(30,35,48,0.5)'}}}}
+});
+
+// ════════════════ SQL QUERIES TAB ════════════════
+const QUERIES=[
+  {id:'Q1',name:'mev_bot_daily_profit',table:'ethereum.transactions + dex.trades',desc:'Daily P&L per MEV bot: pairs known bot addresses with net ETH profit, gas cost, and tx count. Joins prices.usd for USD conversion. Run over 90-day window.',tags:['dex.trades','ethereum.transactions','prices.usd']},
+  {id:'Q2',name:'sandwich_attacks_detected',table:'dex.trades (self-join)',desc:'Detects sandwich bundles via 3-way self-join: frontrun → victim → backrun in same block, same pool, reverse direction. No labeled data needed — pure structural detection.',tags:['dex.trades','block ordering']},
+  {id:'Q3',name:'retail_slippage_impact',table:'dex.trades + pool_prices',desc:'Compares each victim\'s execution price to the rolling 5-block average fair price. Computes slippage % and estimated ETH loss for every sandwiched swap.',tags:['slippage','fair price','victims']},
+  {id:'Q4',name:'top_mev_bots',table:'ethereum.transactions + dex.trades',desc:'Leaderboard: high-volume contract addresses ranked by estimated MEV extracted. Uses 0.1% of volume as MEV proxy. Shows active days, swap count, gas used.',tags:['leaderboard','volume proxy']},
+  {id:'Q5',name:'attack_by_pool',table:'dex.trades + Factory_evt_PoolCreated',desc:'Ranks Uniswap V3 pools by sandwich attack count, victim volume, loss rate, and attacks-per-day. Joins pool factory events for human-readable pair names.',tags:['uniswap_v3','pools','targeting']},
+  {id:'Q6',name:'victim_loss_distribution',table:'dex.trades',desc:'Histogram of victim losses bucketed: <$1, $1-5, $5-10, $10-50, $50-100, $100-500, $500-1k, >$1k. Includes count, total, mean, and median per bucket.',tags:['histogram','victim analytics']},
+  {id:'Q7',name:'mev_vs_gas_margin',table:'ethereum.transactions + dex.trades',desc:'Weekly: gas cost, wasted gas from reverts, revenue proxy, revenue-to-gas ratio. Identifies most gas-efficient bots and compares private vs public strategies.',tags:['gas efficiency','reverts']},
+  {id:'Q8',name:'time_of_day_heatmap',table:'dex.trades',desc:'Groups sandwichable swaps by (day_of_week × hour_utc). Shows when MEV peaks — typically 12-18 UTC weekdays during US/EU market overlap.',tags:['heatmap','time patterns']},
+  {id:'Q9',name:'flashbots_vs_public',table:'mev_boost.blocks',desc:'Compares MEV reward per block between Flashbots relay, beaverbuild, and public mempool builders. Shows private relay advantage in MEV extraction efficiency.',tags:['flashbots','mev-boost','relay']},
+  {id:'Q10',name:'cumulative_mev_extracted',table:'dex.trades + prices.usd',desc:'Running total MEV extracted since 2023-01-01. Daily MEV as 0.25% of sandwichable swap volume. Includes MEV as % of total DEX volume for context.',tags:['cumulative','trend','historical']},
+];
+
+const qg=document.getElementById('query-grid');
+QUERIES.forEach(q=>{
+  const div=document.createElement('div');
+  div.className='query-block';
+  div.innerHTML=`
+    <div class="query-title">${q.id} — ${q.name}</div>
+    <div class="query-desc">${q.desc}</div>
+    <div style="font-size:9px;color:var(--text2);margin-bottom:4px;">Source tables: <span style="color:var(--amber)">${q.table}</span></div>
+    <div class="query-tags">${q.tags.map(t=>`<span class="chip chip-amber">${t}</span>`).join('')}</div>
+  `;
+  qg.appendChild(div);
+});
+</script>
+</body>
+</html>
